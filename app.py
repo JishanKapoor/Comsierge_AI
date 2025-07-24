@@ -15,18 +15,17 @@ from routes import sms_forwarding, add_forwarding_rule, stop_forwarding_rule, sm
 from admin import unassign_phone_number, delete_user
 import logging
 import re
-from flask_socketio import emit, join_room
-from extensions import socketio  # Add this
+from flask_socketio import SocketIO, emit, join_room  # Changed import
 import json
 from ai import classify_priority, allow_held_message, delete_held_messages, held_messages,classify_other, classify_high_type
 import threading
-from extensions import socketio
 from settings import detect_language, translate_message # Add this import
 from settings import settings, get_effective_sending_mode # Add this import
 import upcoming
 import ai
 from ai import HIGH_TYPES
 import random
+import atexit  # Added for scheduler shutdown in production
 # Add this import
 # Configure logging
 logging.getLogger('pymongo').setLevel(logging.INFO)
@@ -34,8 +33,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
-socketio.init_app(app)
 bcrypt = Bcrypt(app)
+
+# Create SocketIO with async_mode='asgi' for Uvicorn compatibility
+socketio = SocketIO(async_mode='asgi')
+socketio.init_app(app)
 
 
 @app.context_processor
@@ -474,136 +476,6 @@ def rewrite_message_route():
     except Exception as e:
         logger.error(f"Error rewriting message: {str(e)}")
         return jsonify({'error': 'Failed to rewrite message'}), 500
-
-# @app.route('/inbox')
-# @login_required
-# def inbox():
-#     username = session.get('username')
-#     user = store.db.users.find_one({'username': username})
-#     if not user:
-#         flash("User not found.", "error")
-#         logger.error(f"User not found: {username}")
-#         return redirect(url_for('login'))
-#
-#     selected_phone_id = session.get('selected_phone_id')
-#     phone_number = None
-#     if selected_phone_id:
-#         phone_doc = store.db.phone_numbers.find_one({'_id': ObjectId(selected_phone_id), 'active': True})
-#         phone_number = phone_doc['number'] if phone_doc else None
-#     else:
-#         logger.debug(f"No selected_phone_id for user {username}")
-#
-#     if not selected_phone_id or not phone_number:
-#         flash("No phone number selected.", "error")
-#         logger.error(f"No phone number selected for user {username}, selected_phone_id: {selected_phone_id}")
-#         return redirect(url_for('select_phone'))
-#
-#     # Fetch contacts (scoped to phone_id for user isolation)
-#     contacts = list(store.db.contacts.find({'phone_id': ObjectId(selected_phone_id)}).sort('alias', 1))
-#     logger.debug(f"Fetched {len(contacts)} contacts for phone_id: {selected_phone_id}")
-#
-#     # Aggregate unique conversations (counterparts, scoped to phone_id)
-#     pipeline = [
-#         {'$match': {'phone_id': ObjectId(selected_phone_id), 'direction': {'$in': ['received', 'sent']}}},
-#         {'$project': {
-#             'counterpart': {
-#                 '$cond': [{'$eq': ['$direction', 'received']}, {'$ifNull': ['$from_number', '$sender']}, '$to_number']
-#             },
-#             'timestamp': '$timestamp',
-#             'body': '$body'
-#         }},
-#         {'$group': {
-#             '_id': '$counterpart',
-#             'last_timestamp': {'$max': '$timestamp'},
-#             'last_body': {'$last': '$body'},
-#             'count': {'$sum': 1}
-#         }},
-#         {'$sort': {'last_timestamp': -1}}
-#     ]
-#     aggregated_convs = list(store.db.message_log.aggregate(pipeline))
-#     logger.debug(f"Aggregated conversations: {len(aggregated_convs)} for phone_id: {selected_phone_id}")
-#
-#     conversations = []
-#     for agg in aggregated_convs:
-#         counterpart = agg['_id']
-#         contact = next((c for c in contacts if c['phone_number'] == counterpart), None)
-#         unread = store.db.message_log.count_documents({
-#             'phone_id': ObjectId(selected_phone_id),
-#             'direction': 'received',
-#             'from_number': counterpart,
-#             'read': False
-#         })
-#         conversations.append({
-#             'counterpart': counterpart,
-#             'alias': contact['alias'] if contact else counterpart,
-#             'label': contact['label'] if contact else 'N/A',
-#             'is_contact': bool(contact),
-#             'count': agg['count'],
-#             'last_message': agg['last_body'],
-#             'last_timestamp': agg['last_timestamp'].isoformat() if agg['last_timestamp'] else None,
-#             'unread': unread
-#         })
-#     logger.debug(f"Processed conversations: {len(conversations)}")
-#
-#     # Include contacts without messages
-#     for contact in contacts:
-#         if not any(c['counterpart'] == contact['phone_number'] for c in conversations):
-#             unread = store.db.message_log.count_documents({
-#                 'phone_id': ObjectId(selected_phone_id),
-#                 'direction': 'received',
-#                 'from_number': contact['phone_number'],
-#                 'read': False
-#             })
-#             conversations.append({
-#                 'counterpart': contact['phone_number'],
-#                 'alias': contact['alias'],
-#                 'label': contact['label'] or 'N/A',
-#                 'is_contact': True,
-#                 'count': 0,
-#                 'last_message': None,
-#                 'last_timestamp': None,
-#                 'unread': unread
-#             })
-#
-#     # Fetch and group all relevant messages (received and sent, excluding forwarded, scoped to phone_id)
-#     messages_query = {
-#         'phone_id': ObjectId(selected_phone_id),
-#         'direction': {'$in': ['received', 'sent']}
-#     }
-#     all_messages = list(store.db.message_log.find(messages_query).sort('timestamp', 1))
-#     logger.debug(f"Retrieved {len(all_messages)} messages for phone_id: {selected_phone_id}")
-#
-#     grouped_messages = {}
-#     for msg in all_messages:
-#         if msg['direction'] == 'received':
-#             counterpart = msg.get('from_number') or msg.get('sender')
-#         else:  # sent
-#             counterpart = msg.get('to_number')
-#         if counterpart not in grouped_messages:
-#             grouped_messages[counterpart] = []
-#         grouped_messages[counterpart].append({
-#             'id': str(msg['_id']),
-#             'direction': msg['direction'],
-#             'body': msg['body'],
-#             'timestamp': msg['timestamp'].isoformat()
-#         })
-#
-#     # Total unread (scoped to phone_id)
-#     total_unread = store.db.message_log.count_documents({
-#         'phone_id': ObjectId(selected_phone_id),
-#         'direction': 'received',
-#         'read': False
-#     })
-#
-#     return render_template(
-#         'inbox.html',
-#         conversations_json=json.dumps(conversations),
-#         grouped_messages_json=json.dumps(grouped_messages),
-#         phone_number=phone_number,
-#         selected_phone_id=selected_phone_id,
-#         active_section='inbox',
-#         total_unread=total_unread
-#     )
 
 @app.route('/select_phone', methods=['GET', 'POST'])
 @login_required
@@ -1320,19 +1192,22 @@ def page_not_found(e):
     return render_template("404.html"), 404
 
 
+# Create admin user if not exists (runs on import)
+if not users_collection.find_one({'username': 'admin'}):
+    users_collection.insert_one({
+        'username': 'admin',
+        'name': 'Administrator',
+        'password': bcrypt.generate_password_hash('admin123').decode('utf-8'),
+        'is_admin': True,
+        'selected_phone_id': None,
+        'receive_language': 'English',
+        'send_language': 'English'
+    })
+
+# Start scheduler and register shutdown for production
+scheduler.start()
+atexit.register(scheduler.shutdown)
 
 if __name__ == '__main__':
-    if not users_collection.find_one({'username': 'admin'}):
-        users_collection.insert_one({
-            'username': 'admin',
-            'name': 'Administrator',
-            'password': bcrypt.generate_password_hash('admin123').decode('utf-8'),
-            'is_admin': True,
-            'selected_phone_id': None,
-            'receive_language': 'English',
-            'send_language': 'English'
-        })
-    try:
-        socketio.run(app, debug=True, port=5000)  # Use socketio.run instead of app.run
-    finally:
-        scheduler.shutdown()
+    # For local development only - use Eventlet or Gevent mode
+    socketio.run(app, debug=True, port=5000)
