@@ -471,22 +471,39 @@ refreshInbox.addEventListener('click', () => {
 });
 
 aiControlsBtn.addEventListener('click', () => toggleSlider('controls'));
+
 aiSummaryBtn.addEventListener('click', () => {
   toggleSlider('summary');
   if (currentCounterpart) {
     summaryText.classList.remove('opacity-100');
     summaryText.classList.add('opacity-0');
     summaryLoader.classList.remove('hidden');
+
     fetch(`/generate_summary/${currentCounterpart}`)
-      .then(res => {
-        if (res.status === 202) {
-          // Wait for socket event
-        } else {
-          summaryText.textContent = 'Error generating summary.';
-          summaryText.classList.remove('opacity-0');
-          summaryText.classList.add('opacity-100');
-          summaryLoader.classList.add('hidden');
+      .then(async res => {
+        const contentType = res.headers.get("content-type");
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(errorText);
         }
+
+        if (res.status === 202) {
+          // Wait for socket event, no change here
+          return;
+        }
+
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          summaryText.textContent = data.summary || 'No summary available.';
+        } else {
+          const text = await res.text();
+          summaryText.textContent = text || 'No summary returned.';
+        }
+
+        summaryText.classList.remove('opacity-0');
+        summaryText.classList.add('opacity-100');
+        summaryLoader.classList.add('hidden');
       })
       .catch(err => {
         summaryText.textContent = 'Error: ' + err.message;
@@ -494,6 +511,7 @@ aiSummaryBtn.addEventListener('click', () => {
         summaryText.classList.add('opacity-100');
         summaryLoader.classList.add('hidden');
       });
+
   } else {
     summaryText.textContent = 'Select a conversation to view its summary.';
     summaryText.classList.remove('opacity-0');
@@ -501,6 +519,7 @@ aiSummaryBtn.addEventListener('click', () => {
     summaryLoader.classList.add('hidden');
   }
 });
+
 
 closeSliderBtn.addEventListener('click', () => toggleSlider());
 backdrop.addEventListener('click', () => toggleSlider());
