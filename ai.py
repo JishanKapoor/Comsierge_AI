@@ -8,13 +8,14 @@ import logging
 from flask_socketio import emit
 from extensions import socketio
 import re
+import time
+from openai import APIError
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-from openai import AzureOpenAI
 
 # Load environment variables from .env file
 load_dotenv()
@@ -63,7 +64,7 @@ def classify_priority(body, from_number, user):
     if any(keyword in body_lower for keyword in spam_keywords):
         return 'low'
 
-    response = client.chat.completions.create(
+    response = safe_create(
         model=deployment_name,
         messages=[
             {"role": "system", "content": _priority_prompt},
@@ -76,7 +77,7 @@ def classify_priority(body, from_number, user):
     return label.replace(" priority", "")
 
 def classify_other(body):
-    response = client.chat.completions.create(
+    response = safe_create(
         model=deployment_name,
         messages=[
             {"role": "system", "content": _other_prompt},
@@ -196,7 +197,7 @@ _high_type_prompt = (
 )
 
 def classify_high_type(body):
-    response = client.chat.completions.create(
+    response = safe_create(
         model=deployment_name,
         messages=[
             {"role": "system", "content": _high_type_prompt},
@@ -215,7 +216,7 @@ def generate_suggestions(history):
         + history_str + "\n\nGenerate exactly 3 short, appropriate reply suggestions. Make them concise and natural.\n"
         "Return only JSON: {\"suggestions\": [\"suggestion1\", \"suggestion2\", \"suggestion3\"]}"
     )
-    response = client.chat.completions.create(
+    response = safe_create(
         model=deployment_name,
         messages=[{"role": "system", "content": prompt}],
         response_format={"type": "json_object"}
@@ -237,7 +238,7 @@ def rewrite_message(message):
         "Rewrite this SMS message to correct grammar, improve clarity, and make it more polite if appropriate. Keep it concise.\n"
         "Message: " + message + "\n\nReturn only JSON: {\"rewritten\": \"rewritten message\"}"
     )
-    response = client.chat.completions.create(
+    response = safe_create(
         model=deployment_name,
         messages=[{"role": "system", "content": prompt}],
         response_format={"type": "json_object"}
@@ -254,25 +255,65 @@ def rewrite_message_async(message, room):
         logger.error(f"Error rewriting message: {str(e)}")
         socketio.emit('ai_error', {'error': 'Failed to rewrite message'}, room=room)
 
-def summarize_conversation(history):
+def summarize_conversation(history, room=None):  # Room optional for sync use
     history_str = json.dumps(history)
-    prompt = (
-        "Summarize this SMS conversation briefly (2-3 sentences). Focus on key points, actions, and sentiment. History (alternating user/assistant, latest at end):\n"
-        + history_str + "\n\nReturn only JSON: {\"summary\": \"your summary here\"}"
+    system_prompt = (
+        "You are a summarization assistant. Output ONLY valid JSON, no extra text, no explanations, no markdown, no wrappers like ```json. "
+        "Ensure all strings are properly escaped. "
+        "Summarize the SMS conversation in 2-3 sentences, focusing on key points, actions, and sentiment. "
+        "The history is a JSON array (alternating user/assistant messages, latest at end)."
     )
-    response = client.chat.completions.create(
+    user_prompt = history_str
+    prompt_for_json = "Format: {\"summary\": \"your concise summary\"}"
+
+    logger.debug(f"Full prompt: {system_prompt + '\n' + prompt_for_json + '\nUser: ' + user_prompt[:500]}...")  # Debug log
+
+    response = safe_create(
         model=deployment_name,
-        messages=[{"role": "system", "content": prompt}],
+        messages=[
+            {"role": "system", "content": system_prompt + "\n" + prompt_for_json},
+            {"role": "user", "content": user_prompt}
+        ],
         response_format={"type": "json_object"}
     )
-    result = response.choices[0].message.content
-    summary = json.loads(result)["summary"]
-    return summary
+    result = response.choices[0].message.content.strip()
+    logger.debug(f"Raw API response: {result}")  # Debug raw output
+
+    # Handle common invalid JSON wrappers
+    if result.startswith('```json
+        result = result[7:].rstrip('```').strip()
+    elif result.startswith('{') and result.endswith('}'):
+        pass  # Already good
+    else:
+        # Attempt to extract JSON if prefixed
+        json_start = result.find('{')
+        json_end = result.rfind('}') + 1
+        if json_start != -1 and json_end != 0:
+            result = result[json_start:json_end]
+
+    try:
+        summary = json.loads(result)["summary"]
+        return summary
+    except json.JSONDecodeError as je:
+        logger.error(f"Invalid JSON from model: {result}")
+        return "Summary unavailable: Invalid response format."  # Fallback
 
 def summarize_conversation_async(history, room):
     try:
         summary = summarize_conversation(history)
         socketio.emit('ai_summary_ready', {'summary': summary}, room=room)
     except Exception as e:
-        logger.error(f"Error summarizing conversation: {str(e)}")
-        socketio.emit('ai_error', {'error': 'Failed to summarize conversation'}, room=room)
+        logger.error(f"Async summary error: {str(e)}")
+        socketio.emit('ai_error', {'error': 'Failed to generate summary'}, room=room)
+
+# Helper for retries on API calls
+def safe_create(*args, **kwargs):
+    for attempt in range(3):
+        try:
+            return client.chat.completions.create(*args, **kwargs)
+        except APIError as e:
+            if e.status_code in [429, 500]:  # Rate limit or server error
+                time.sleep(2 ** attempt)
+            else:
+                raise
+    raise Exception("Max retries exceeded for API call")
