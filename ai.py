@@ -280,7 +280,7 @@ def summarize_conversation(history, room=None):  # Room optional for sync use
     logger.debug(f"Raw API response: {result}")  # Debug raw output
 
     # Handle common invalid JSON wrappers
-    if result.startswith('```json
+    if result.startswith('```json'):
         result = result[7:].rstrip('```').strip()
     elif result.startswith('{') and result.endswith('}'):
         pass  # Already good
