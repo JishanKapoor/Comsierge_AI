@@ -2,8 +2,6 @@ services:
   - type: web
     name: Comsierge_AI
     env: python
-    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:socketio_app --host 0.0.0.0 --port $PORT
-    build:
-      pythonVersion: 3.11
+    startCommand: gunicorn app:app --worker-class eventlet -w 1
+    plan: free  # or starter, etc.
