@@ -405,6 +405,8 @@ def inbox():
         total_unread=total_unread
     )
 
+# app.py updates (add these routes)
+
 @app.route('/generate_summary/<phone>', methods=['GET'])
 @login_required
 def generate_summary(phone):
@@ -412,6 +414,7 @@ def generate_summary(phone):
     if not selected_phone_id:
         return jsonify({'error': 'No phone number selected'}), 400
 
+    # Fetch last 10 messages for better context
     messages = list(store.db.message_log.find({
         'phone_id': ObjectId(selected_phone_id),
         '$or': [{'from_number': phone, 'direction': 'received'}, {'to_number': phone, 'direction': 'sent'}]
@@ -423,25 +426,11 @@ def generate_summary(phone):
         history.append({"role": role, "content": msg['body']})
 
     try:
-        raw_summary = ai.summarize_conversation(history, f"user_{selected_phone_id}")
-
-        # Try parsing JSON summary, fallback to raw text
-        try:
-            summary_json = json.loads(raw_summary)
-            summary = summary_json.get('summary', raw_summary)
-        except (json.JSONDecodeError, TypeError):
-            summary = raw_summary
-
-        socketio.emit('ai_summary_ready', {'summary': summary}, room=f"user_{selected_phone_id}")
-        return jsonify({'status': 'processing'}), 202
-
+        summary = ai.summarize_conversation(history)
+        return jsonify({'summary': summary}), 200
     except Exception as e:
         logger.error(f"Error generating summary: {str(e)}")
-        socketio.emit('ai_error', {'error': 'Failed to generate summary'}, room=f"user_{selected_phone_id}")
         return jsonify({'error': 'Failed to generate summary'}), 500
-
-
-   
 
 @app.route('/generate_suggestions/<phone>', methods=['GET'])
 @login_required
@@ -466,7 +455,7 @@ def generate_suggestions(phone):
         return jsonify({'suggestions': suggestions}), 200
     except Exception as e:
         logger.error(f"Error generating suggestions: {str(e)}")
-        return jsonify({'error': f'Error generating summary: {str(e)}'}), 500
+        return jsonify({'error': 'Failed to generate suggestions'}), 500
 
 @app.route('/rewrite_message', methods=['POST'])
 @login_required
