@@ -414,26 +414,22 @@ def generate_summary(phone):
     if not selected_phone_id:
         return jsonify({'error': 'No phone number selected'}), 400
 
-    # Fetch last 10 messages for better context
+    # Fetch last 10 messages for better context (reduced to 5 to minimize token usage)
     messages = list(store.db.message_log.find({
         'phone_id': ObjectId(selected_phone_id),
         '$or': [{'from_number': phone, 'direction': 'received'}, {'to_number': phone, 'direction': 'sent'}]
-    }).sort('timestamp', -1).limit(10))
+    }).sort('timestamp', -1).limit(5))  # Changed to limit(5) for safety
 
     history = []
     for msg in reversed(messages):
         role = "user" if msg['direction'] == 'received' else "assistant"
         history.append({"role": role, "content": msg['body']})
 
-    # Run summarize_conversation_async and get result
-    try:
-        summary = ai.summarize_conversation(history, f"user_{selected_phone_id}")
-        socketio.emit('ai_summary_ready', {'summary': summary}, room=f"user_{selected_phone_id}")
-        return jsonify({'status': 'processing'}), 202
-    except Exception as e:
-        logger.error(f"Error generating summary: {str(e)}")
-        socketio.emit('ai_error', {'error': 'Failed to generate summary'}, room=f"user_{selected_phone_id}")
-        return jsonify({'error': 'Failed to generate summary'}), 500
+    room = f"user_{selected_phone_id}"
+    Thread(target=ai.summarize_conversation_async, args=(history, room)).start()
+    return jsonify({'status': 'processing'}), 202
+
+   
 
 @app.route('/generate_suggestions/<phone>', methods=['GET'])
 @login_required
