@@ -36,8 +36,7 @@ app.secret_key = "supersecretkey"
 bcrypt = Bcrypt(app)
 
 # Create SocketIO with async_mode='asgi' for Uvicorn compatibility
-socketio = SocketIO(async_mode='asgi')
-socketio.init_app(app)
+socketio = SocketIO(app, async_mode='asgi')  # Ensure 'asgi' for Uvicorn
 
 
 @app.context_processor
@@ -1209,5 +1208,5 @@ scheduler.start()
 atexit.register(scheduler.shutdown)
 
 if __name__ == '__main__':
-    # For local development only - use Eventlet or Gevent mode
+    # For local development only
     socketio.run(app, debug=True, port=5000)
