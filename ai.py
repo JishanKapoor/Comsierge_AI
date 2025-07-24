@@ -266,7 +266,6 @@ def summarize_conversation(history, room=None):  # Room optional for sync use
     user_prompt = history_str
     prompt_for_json = "Format: {\"summary\": \"your concise summary\"}"
 
-    logger.debug(f"Full prompt: {system_prompt + '\n' + prompt_for_json + '\nUser: ' + user_prompt[:500]}...")  # Debug log
 
     response = safe_create(
         model=deployment_name,
