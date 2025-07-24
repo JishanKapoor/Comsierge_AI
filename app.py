@@ -454,7 +454,7 @@ def generate_suggestions(phone):
         return jsonify({'suggestions': suggestions}), 200
     except Exception as e:
         logger.error(f"Error generating suggestions: {str(e)}")
-        return jsonify({'error': 'Failed to generate suggestions'}), 500
+        return jsonify({'error': f'Error generating summary: {str(e)}'}), 500
 
 @app.route('/rewrite_message', methods=['POST'])
 @login_required
