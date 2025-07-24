@@ -1320,6 +1320,8 @@ def page_not_found(e):
     return render_template("404.html"), 404
 
 
+import os
+
 if __name__ == '__main__':
     if not users_collection.find_one({'username': 'admin'}):
         users_collection.insert_one({
@@ -1332,6 +1334,23 @@ if __name__ == '__main__':
             'send_language': 'English'
         })
     try:
-        socketio.run(app, debug=True, port=5000)  # Use socketio.run instead of app.run
+        port = int(os.environ.get('PORT', 5000))
+        socketio.run(app, debug=True, host='0.0.0.0', port=port)
     finally:
         scheduler.shutdown()
+
+# if __name__ == '__main__':
+#     if not users_collection.find_one({'username': 'admin'}):
+#         users_collection.insert_one({
+#             'username': 'admin',
+#             'name': 'Administrator',
+#             'password': bcrypt.generate_password_hash('admin123').decode('utf-8'),
+#             'is_admin': True,
+#             'selected_phone_id': None,
+#             'receive_language': 'English',
+#             'send_language': 'English'
+#         })
+#     try:
+#         socketio.run(app, debug=True, port=5000)  # Use socketio.run instead of app.run
+#     finally:
+#         scheduler.shutdown()
