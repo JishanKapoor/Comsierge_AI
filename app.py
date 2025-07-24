@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_bcrypt import Bcrypt
 from flask import jsonify
+from flask import make_response
 from functools import wraps
 from db import users_collection, store
 from bson.objectid import ObjectId
@@ -92,10 +93,11 @@ def handle_join_room(data):
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # Clear session on GET request to ensure login page is shown
+    # Clear session and prevent caching on GET request
     if request.method == 'GET':
         session.clear()
 
+    # If user is already logged in, redirect accordingly
     if session.get('logged_in'):
         if session.get('is_admin', False):
             return redirect(url_for('admin_panel'))
@@ -104,36 +106,45 @@ def login():
         else:
             return redirect(url_for('dashboard'))
 
+    # Handle login submission
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
 
         if not username or not password:
             flash('Username and password are required.', 'error')
-            return render_template('login.html', active_section='login')
+            response = make_response(render_template('login.html', active_section='login'))
+        else:
+            user = users_collection.find_one({'username': username})
+            if user and bcrypt.check_password_hash(user['password'], password):
+                session['logged_in'] = True
+                session['user_id'] = str(user['_id'])
+                session['username'] = username
+                session['name'] = user.get('name')
+                session['is_admin'] = user.get('is_admin', False)
+                selected_phone_id = user.get('selected_phone_id')
+                session['selected_phone_id'] = str(selected_phone_id) if selected_phone_id else None
 
-        user = users_collection.find_one({'username': username})
-        if user and bcrypt.check_password_hash(user['password'], password):
-            session['logged_in'] = True
-            session['user_id'] = str(user['_id'])
-            session['username'] = username
-            session['name'] = user.get('name')
-            session['is_admin'] = user.get('is_admin', False)
-            selected_phone_id = user.get('selected_phone_id')
-            session['selected_phone_id'] = str(selected_phone_id) if selected_phone_id else None
-            # Remove session.permanent to avoid long-lived sessions
-            # session.permanent = True
+                if session['is_admin']:
+                    return redirect(url_for('admin_panel'))
+                elif not session.get('selected_phone_id'):
+                    return redirect(url_for('select_phone'))
+                else:
+                    return redirect(url_for('dashboard'))
 
-            if session['is_admin']:
-                return redirect(url_for('admin_panel'))
-            elif not session.get('selected_phone_id'):
-                return redirect(url_for('select_phone'))
-            else:
-                return redirect(url_for('dashboard'))
+            flash('Invalid credentials', 'error')
 
-        flash('Invalid credentials', 'error')
+        # Fallthrough in case of login error
+        response = make_response(render_template('login.html', active_section='login'))
+    else:
+        # GET request — return login page
+        response = make_response(render_template('login.html', active_section='login'))
 
-    return render_template('login.html', active_section='login')
+    # Set no-cache headers to prevent forward/back button reuse
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/signup', methods=['GET', 'POST'])
