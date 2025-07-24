@@ -405,42 +405,40 @@ def inbox():
         total_unread=total_unread
     )
 
-# app.py updates (add these routes)
-
-@app.route('/generate_suggestions/<phone>', methods=['GET'])
+@app.route('/generate_summary/<phone>', methods=['GET'])
 @login_required
-def generate_suggestions(phone):
+def generate_summary(phone):
     selected_phone_id = session.get('selected_phone_id')
     if not selected_phone_id:
         return jsonify({'error': 'No phone number selected'}), 400
 
-    # Fetch last 5 messages for context (scoped to phone_id)
     messages = list(store.db.message_log.find({
         'phone_id': ObjectId(selected_phone_id),
-        '$or': [
-            {'from_number': phone, 'direction': 'received'},
-            {'to_number': phone, 'direction': 'sent'}
-        ]
-    }).sort('timestamp', -1).limit(5))
+        '$or': [{'from_number': phone, 'direction': 'received'}, {'to_number': phone, 'direction': 'sent'}]
+    }).sort('timestamp', -1).limit(10))
 
     history = []
-    for msg in reversed(messages):  # Reverse to chronological order
+    for msg in reversed(messages):
         role = "user" if msg['direction'] == 'received' else "assistant"
         history.append({"role": role, "content": msg['body']})
 
     try:
-        suggestions = ai.generate_suggestions(history)
+        raw_summary = ai.summarize_conversation(history, f"user_{selected_phone_id}")
 
-        # Return raw string if it's not a list/dict
-        if isinstance(suggestions, str):
-            return suggestions, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+        # Try parsing JSON summary, fallback to raw text
+        try:
+            summary_json = json.loads(raw_summary)
+            summary = summary_json.get('summary', raw_summary)
+        except (json.JSONDecodeError, TypeError):
+            summary = raw_summary
 
-        # Otherwise assume it's JSON-serializable (e.g., list or dict)
-        return jsonify({'suggestions': suggestions}), 200
+        socketio.emit('ai_summary_ready', {'summary': summary}, room=f"user_{selected_phone_id}")
+        return jsonify({'status': 'processing'}), 202
 
     except Exception as e:
-        logger.error(f"Error generating suggestions: {str(e)}")
-        return jsonify({'error': f'Error generating suggestions: {str(e)}'}), 500
+        logger.error(f"Error generating summary: {str(e)}")
+        socketio.emit('ai_error', {'error': 'Failed to generate summary'}, room=f"user_{selected_phone_id}")
+        return jsonify({'error': 'Failed to generate summary'}), 500
 
 
    
