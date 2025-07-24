@@ -3,7 +3,7 @@ Flask-Bcrypt==1.0.1
 Flask-SocketIO==5.3.6
 pymongo==4.8.0
 twilio==9.2.3
-openai==1.35.10
+openai==1.91.0
 pytz==2024.1
 python-dotenv==1.0.1
 deep-translator==1.11.4
