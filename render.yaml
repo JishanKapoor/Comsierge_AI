@@ -1,7 +1,10 @@
 services:
   - type: web
     name: Comsierge_AI
-    env: python
+    runtime: python
+    branch: main  # Or your branch
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --worker-class eventlet -w 1
-    plan: free  # or starter, etc.
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
