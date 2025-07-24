@@ -15,17 +15,18 @@ from routes import sms_forwarding, add_forwarding_rule, stop_forwarding_rule, sm
 from admin import unassign_phone_number, delete_user
 import logging
 import re
-from flask_socketio import SocketIO, emit, join_room  # Changed import
+from flask_socketio import emit, join_room
+from extensions import socketio  # Add this
 import json
 from ai import classify_priority, allow_held_message, delete_held_messages, held_messages,classify_other, classify_high_type
 import threading
+from extensions import socketio
 from settings import detect_language, translate_message # Add this import
 from settings import settings, get_effective_sending_mode # Add this import
 import upcoming
 import ai
 from ai import HIGH_TYPES
 import random
-import atexit  # Added for scheduler shutdown in production
 # Add this import
 # Configure logging
 logging.getLogger('pymongo').setLevel(logging.INFO)
@@ -33,10 +34,8 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
+socketio.init_app(app)
 bcrypt = Bcrypt(app)
-
-# Create SocketIO with async_mode='asgi' for Uvicorn compatibility
-socketio = SocketIO(app, async_mode='asgi')  # Ensure 'asgi' for Uvicorn
 
 
 @app.context_processor
@@ -1191,22 +1190,18 @@ def page_not_found(e):
     return render_template("404.html"), 404
 
 
-# Create admin user if not exists (runs on import)
-if not users_collection.find_one({'username': 'admin'}):
-    users_collection.insert_one({
-        'username': 'admin',
-        'name': 'Administrator',
-        'password': bcrypt.generate_password_hash('admin123').decode('utf-8'),
-        'is_admin': True,
-        'selected_phone_id': None,
-        'receive_language': 'English',
-        'send_language': 'English'
-    })
-
-# Start scheduler and register shutdown for production
-scheduler.start()
-atexit.register(scheduler.shutdown)
-
 if __name__ == '__main__':
-    # For local development only
-    socketio.run(app, debug=True, port=5000)
+    if not users_collection.find_one({'username': 'admin'}):
+        users_collection.insert_one({
+            'username': 'admin',
+            'name': 'Administrator',
+            'password': bcrypt.generate_password_hash('admin123').decode('utf-8'),
+            'is_admin': True,
+            'selected_phone_id': None,
+            'receive_language': 'English',
+            'send_language': 'English'
+        })
+    try:
+        socketio.run(app, debug=True, port=5000)  # Use socketio.run instead of app.run
+    finally:
+        scheduler.shutdown()
