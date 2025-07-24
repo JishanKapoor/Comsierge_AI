@@ -8,13 +8,13 @@ import logging
 from flask_socketio import emit
 from extensions import socketio
 import re
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-from openai import AzureOpenAI
 
 # Load environment variables from .env file
 load_dotenv()
@@ -254,7 +254,7 @@ def rewrite_message_async(message, room):
         logger.error(f"Error rewriting message: {str(e)}")
         socketio.emit('ai_error', {'error': 'Failed to rewrite message'}, room=room)
 
-def summarize_conversation(history, room):
+def summarize_conversation(history):
     history_str = json.dumps(history)
     prompt = (
         "Summarize this SMS conversation briefly (2-3 sentences). Focus on key points, actions, and sentiment. History (alternating user/assistant, latest at end):\n"
@@ -268,3 +268,11 @@ def summarize_conversation(history, room):
     result = response.choices[0].message.content
     summary = json.loads(result)["summary"]
     return summary
+
+def summarize_conversation_async(history, room):
+    try:
+        summary = summarize_conversation(history)
+        socketio.emit('ai_summary_ready', {'summary': summary}, room=room)
+    except Exception as e:
+        logger.error(f"Error generating summary: {str(e)}")
+        socketio.emit('ai_error', {'error': 'Failed to generate summary'}, room=room)
