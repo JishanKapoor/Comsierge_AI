@@ -363,7 +363,7 @@ function deleteChat(phone) {
             renderContacts();
           }
           if (currentCounterpart === phone) {
-            chatMessages.innerHTML = '<div class="flex-1 flex items-center justify-center h-full"><p class="text-xs text-zinc-500">Select a conversation to view messages.</p></div>';
+            chatMessages.innerHTML = '<div class="text-center py-4"><p class="text-xs text-zinc-500">Select a conversation to view messages.</p></div>';
             conversation.classList.add('hidden');
             conversationHeader.classList.add('hidden');
             messageInputContainer.classList.add('hidden');
@@ -471,36 +471,20 @@ refreshInbox.addEventListener('click', () => {
 });
 
 aiControlsBtn.addEventListener('click', () => toggleSlider('controls'));
-
 aiSummaryBtn.addEventListener('click', () => {
   toggleSlider('summary');
   if (currentCounterpart) {
     summaryText.classList.remove('opacity-100');
     summaryText.classList.add('opacity-0');
     summaryLoader.classList.remove('hidden');
-
     fetch(`/generate_summary/${currentCounterpart}`)
-      .then(async res => {
-        const contentType = res.headers.get("content-type");
-
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(errorText);
-        }
-
-        if (res.status === 202) {
-          // Wait for socket event, no change here
-          return;
-        }
-
-        if (contentType && contentType.includes("application/json")) {
-          const data = await res.json();
-          summaryText.textContent = data.summary || 'No summary available.';
+      .then(res => res.json())
+      .then(data => {
+        if (data.summary) {
+          summaryText.textContent = data.summary;
         } else {
-          const text = await res.text();
-          summaryText.textContent = text || 'No summary returned.';
+          summaryText.textContent = 'Error generating summary: ' + (data.error || 'Unknown error');
         }
-
         summaryText.classList.remove('opacity-0');
         summaryText.classList.add('opacity-100');
         summaryLoader.classList.add('hidden');
@@ -511,7 +495,6 @@ aiSummaryBtn.addEventListener('click', () => {
         summaryText.classList.add('opacity-100');
         summaryLoader.classList.add('hidden');
       });
-
   } else {
     summaryText.textContent = 'Select a conversation to view its summary.';
     summaryText.classList.remove('opacity-0');
@@ -519,7 +502,6 @@ aiSummaryBtn.addEventListener('click', () => {
     summaryLoader.classList.add('hidden');
   }
 });
-
 
 closeSliderBtn.addEventListener('click', () => toggleSlider());
 backdrop.addEventListener('click', () => toggleSlider());
@@ -754,27 +736,13 @@ socket.on('chat_deleted', (data) => {
     renderContacts();
   }
   if (currentCounterpart === data.phone_number) {
-    chatMessages.innerHTML = '<div class="flex-1 flex items-center justify-center h-full"><p class="text-xs text-zinc-500">Select a conversation to view messages.</p></div>';
+    chatMessages.innerHTML = '<div class="text-center py-4"><p class="text-xs text-zinc-500">Select a conversation to view messages.</p></div>';
     conversation.classList.add('hidden');
     conversationHeader.classList.add('hidden');
     messageInputContainer.classList.add('hidden');
     document.getElementById('contact-list-container').classList.remove('hidden');
     currentCounterpart = null;
   }
-});
-
-socket.on('ai_summary_ready', (data) => {
-  summaryLoader.classList.add('hidden');
-  summaryText.textContent = data.summary;
-  summaryText.classList.remove('opacity-0');
-  summaryText.classList.add('opacity-100');
-});
-
-socket.on('ai_error', (data) => {
-  summaryLoader.classList.add('hidden');
-  summaryText.textContent = data.error;
-  summaryText.classList.remove('opacity-0');
-  summaryText.classList.add('opacity-100');
 });
 
 socket.on('connect', () => {
