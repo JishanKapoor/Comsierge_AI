@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: Comsierge_AI
+    env: python
+    pythonVersion: "3.12"
+    region: oregon
+    plan: starter
+    branch: main
+    repo: https://github.com/JishanKapoor/Comsierge_AI
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class gevent -w 1 -b 0.0.0.0:$PORT app:app
+    autoDeploy: true
+    envVars:
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_API_VERSION
+        sync: false
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: MONGO_DB
+        sync: false
+      - key: MONGO_URI
+        sync: false
+    healthCheckPath: /healthz
