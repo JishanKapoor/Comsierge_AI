@@ -407,27 +407,41 @@ def inbox():
 
 # app.py updates (add these routes)
 
-@app.route('/generate_summary/<phone>', methods=['GET'])
+@app.route('/generate_suggestions/<phone>', methods=['GET'])
 @login_required
-def generate_summary(phone):
+def generate_suggestions(phone):
     selected_phone_id = session.get('selected_phone_id')
     if not selected_phone_id:
         return jsonify({'error': 'No phone number selected'}), 400
 
-    # Fetch last 10 messages for better context (reduced to 5 to minimize token usage)
+    # Fetch last 5 messages for context (scoped to phone_id)
     messages = list(store.db.message_log.find({
         'phone_id': ObjectId(selected_phone_id),
-        '$or': [{'from_number': phone, 'direction': 'received'}, {'to_number': phone, 'direction': 'sent'}]
-    }).sort('timestamp', -1).limit(5))  # Changed to limit(5) for safety
+        '$or': [
+            {'from_number': phone, 'direction': 'received'},
+            {'to_number': phone, 'direction': 'sent'}
+        ]
+    }).sort('timestamp', -1).limit(5))
 
     history = []
-    for msg in reversed(messages):
+    for msg in reversed(messages):  # Reverse to chronological order
         role = "user" if msg['direction'] == 'received' else "assistant"
         history.append({"role": role, "content": msg['body']})
 
-    room = f"user_{selected_phone_id}"
-    Thread(target=ai.summarize_conversation_async, args=(history, room)).start()
-    return jsonify({'status': 'processing'}), 202
+    try:
+        suggestions = ai.generate_suggestions(history)
+
+        # Return raw string if it's not a list/dict
+        if isinstance(suggestions, str):
+            return suggestions, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+        # Otherwise assume it's JSON-serializable (e.g., list or dict)
+        return jsonify({'suggestions': suggestions}), 200
+
+    except Exception as e:
+        logger.error(f"Error generating suggestions: {str(e)}")
+        return jsonify({'error': f'Error generating suggestions: {str(e)}'}), 500
+
 
    
 
